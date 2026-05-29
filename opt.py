@@ -1,56 +1,56 @@
 import pulp
 import streamlit as st
-from graphviz import Digraph
 
-# --- LOGIC: The Branch and Bound Solver ---
-class BBNode:
-    def __init__(self, items, capacity, constraints=None, parent_id=None, node_id=0):
-        self.items = items  # List of (name, value, cost)
-        self.capacity = capacity
-        self.constraints = constraints or {}
-        self.id = str(node_id)
-        self.parent_id = parent_id
-        self.status = ""
-        self.lp_value = 0
-        self.vars = {}
-
-    def solve(self):
-        # Create a Linear Program
-        prob = pulp.LpProblem(f"Node_{self.id}", pulp.LpMaximize)
-        
-        # Variables: Continuous [0, 1] for relaxation
-        vars = {i: pulp.LpVariable(f"x_{i}", 0, 1) for i in range(len(self.items))}
-        
-        # Objective: Maximize 'Yumminess'
-        prob += pulp.lpSum([vars[i] * self.items[i][1] for i in range(len(self.items))])
-        
-        # Constraint: Budget/Capacity
-        prob += pulp.lpSum([vars[i] * self.items[i][2] for i in range(len(self.items))]) <= self.capacity
-        
-        # Apply branching constraints (the 'Branch' part)
-        for i, val in self.constraints.items():
-            prob += (vars[i] == val)
-
-        prob.solve(pulp.PULP_CBC_CMD(msg=0))
-        
-        if pulp.LpStatus[prob.status] == 'Infeasible':
-            self.status = "Infeasible"
-            return None
-        
-        self.lp_value = pulp.value(prob.objective)
-        self.vars = {i: pulp.value(vars[i]) for i in range(len(self.items))}
-        return self.lp_value
-
-# --- UI: Streamlit Interface ---
-st.title("🍕 Pizza Optimizer: Branch & Bound Visualizer")
-
-# Input Data
-pizza_data = [
-    ("Pepperoni", 10, 15), # (Name, Value/Yum, Cost)
-    ("Mushroom", 8, 10),
-    ("Extra Cheese", 5, 7)
+# 1. Define the Data
+toppings = [
+    {"name": "Nduja", "cost": 0.50, "satisfaction": 4.8},
+    {"name": "Salame", "cost": 2.00, "satisfaction": 8.3},
+    {"name": "Parma ham", "cost": 3.00, "satisfaction": 7.2},
+    {"name": "Fried eggplant", "cost": 2.00, "satisfaction": 5.2},
+    {"name": "Buffalo mozzarella", "cost": 2.00, "satisfaction": 5.0},
+    {"name": "Ricotta", "cost": 1.00, "satisfaction": 4.2},
+    {"name": "Pancetta", "cost": 2.00, "satisfaction": 4.2},
+    {"name": "Zucchini", "cost": 1.00, "satisfaction": 3.5},
+    {"name": "Burrata", "cost": 3.00, "satisfaction": 4.7},
+    {"name": "Gorgonzola", "cost": 1.50, "satisfaction": 3.1},
 ]
-budget = st.sidebar.slider("Budget", 5, 50, 20)
 
-# Implementation of the Tree logic would go here...
-# (You can use a recursive loop to build a 'dot' graph for visualization)
+budget = 7.00
+
+def solve_pizza(is_binary=False):
+    # Create the problem
+    prob = pulp.LpProblem("Pizza_Optimizer", pulp.LpMaximize)
+    
+    # Decision Variables
+    # Requirement 2 uses cat='Binary'
+    # Requirement 3 uses cat='Continuous' with lowBound=0, upBound=1
+    cat = pulp.LpBinary if is_binary else pulp.LpContinuous
+    choices = pulp.LpVariable.dicts("Topping", range(len(toppings)), 0, 1, cat=cat)
+    
+    # Objective Function: Maximize Satisfaction
+    prob += pulp.lpSum([choices[i] * toppings[i]["satisfaction"] for i in range(len(toppings))])
+    
+    # Constraint: Cost <= $7.00
+    prob += pulp.lpSum([choices[i] * toppings[i]["cost"] for i in range(len(toppings))]) <= budget
+    
+    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    
+    return prob, choices
+
+# --- Execution ---
+st.title("Pizza Optimizer B&B Engine")
+
+# Requirement 3: Continuous Solution
+st.subheader("Requirement 3: Continuous (Decimal) Relaxation")
+prob_cont, choices_cont = solve_pizza(is_binary=False)
+st.write(f"Best Satisfaction (Continuous): {pulp.value(prob_cont.objective):.2f}")
+
+# Requirement 2: Binary Solution
+st.subheader("Requirement 2: Binary (0/1) Solution")
+prob_bin, choices_bin = solve_pizza(is_binary=True)
+st.write(f"Best Satisfaction (Binary): {pulp.value(prob_bin.objective):.2f}")
+
+# Display items chosen
+for i in range(len(toppings)):
+    if pulp.value(choices_bin[i]) > 0:
+        st.write(f"✅ {toppings[i]['name']} (Cost: ${toppings[i]['cost']})")
